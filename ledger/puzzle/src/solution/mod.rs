@@ -23,13 +23,13 @@ use console::{account::Address, network::prelude::*, prelude::DeserializeExt};
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Solution<N: Network> {
     /// The solution ID.
-    solution_id: SolutionID<N>,
+    pub solution_id: SolutionID<N>,
     /// The epoch hash.
-    epoch_hash: N::BlockHash,
+    pub epoch_hash: N::BlockHash,
     /// The address of the prover.
-    address: Address<N>,
+    pub address: Address<N>,
     /// The counter for the solution.
-    counter: u64,
+    pub counter: u64,
 }
 
 impl<N: Network> Solution<N> {
