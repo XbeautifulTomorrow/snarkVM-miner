@@ -22,9 +22,10 @@ pub use path::*;
 mod tests;
 
 use snarkvm_console_types::prelude::*;
-
 use aleo_std::prelude::*;
 use std::ops::Range;
+
+use snarkvm_utilities::{ bytes_from_bits_le};
 
 #[derive(Clone)]
 pub struct KaryMerkleTree<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY: u8> {
@@ -64,6 +65,7 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY: 
     pub fn new(leaf_hasher: &LH, path_hasher: &PH, leaves: &[LH::Leaf]) -> Result<Self> {
         let timer = timer!("MerkleTree::new");
 
+        println!("mtree depth={}, arity={}", DEPTH, ARITY);
         // Ensure the Merkle tree depth is greater than 0.
         ensure!(DEPTH > 0, "Merkle tree depth must be greater than 0");
         // Ensure the Merkle tree depth is less than or equal to 64.
@@ -101,18 +103,26 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY: 
         );
 
         // Initialize the Merkle tree.
-        let mut tree = vec![empty_hash; minimum_tree_size];
+        let mut tree = vec![empty_hash; minimum_tree_size];        
 
         // Compute and store each leaf hash.
         tree[num_nodes..num_nodes + leaves.len()].clone_from_slice(&leaf_hasher.hash_leaves(leaves)?);
         lap!(timer, "Hashed {} leaves", leaves.len());
 
+        // let foo1 = &tree[num_nodes];
+        // let foolast = &tree[num_nodes+leaves.len()-1];
+
+        let mut mycnt = 0;
         // Compute and store the hashes for each level, iterating from the penultimate level to the root level.
         let mut start_index = num_nodes;
         // Compute the start index of the current level.
         while let Some(start) = parent::<ARITY>(start_index) {
+            
+            mycnt += 1;
             // Compute the end index of the current level.
             let end = child_indexes::<ARITY>(start).next().ok_or_else(|| anyhow!("Missing left-most child"))?;
+
+            println!("start={}, start_index={} end={end}", start, start_index);
 
             // Construct the children for each node in the current level.
             let child_nodes = (start..end)
@@ -120,9 +130,19 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY: 
                 .map(|i| &tree[child_indexes::<ARITY>(i)])
                 .collect::<Vec<_>>();
 
+            let child_nodes2 = (start..end)
+                .take_while(|&i| child_indexes::<ARITY>(i).next().and_then(|idx| tree.get(idx)).is_some())
+                .map(|i| child_indexes::<ARITY>(i))
+                .collect::<Vec<_>>();
+
             // Compute and store the hashes for each node in the current level.
             let num_full_nodes = child_nodes.len();
             let hashes = path_hasher.hash_all_children(&child_nodes)?;
+            
+            
+            let foo1 = hashes[0].to_bytes_le().unwrap();
+            let foo2 = hashes.last().unwrap().to_bytes_le().unwrap();
+
             tree[start..][..num_full_nodes].clone_from_slice(&hashes);
             // Use the precomputed empty node hash for every empty node, if there are any.
             if start + num_full_nodes < end {

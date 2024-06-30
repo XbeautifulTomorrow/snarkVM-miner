@@ -16,6 +16,10 @@ name = "merkle_tree"
 path = "benches/merkle_tree.rs"
 harness = false
 
+[dependencies.snarkvm-utilities]
+path = "../../utilities"
+version = "=0.16.19"
+
 [dependencies.snarkvm-console-algorithms]
 path = "../algorithms"
 version = "=0.16.19"

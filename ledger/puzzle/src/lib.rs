@@ -50,7 +50,7 @@ use core::num::NonZeroUsize;
 use indexmap::IndexMap;
 use lru::LruCache;
 use parking_lot::RwLock;
-use rand::SeedableRng;
+use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use std::sync::Arc;
 
@@ -100,7 +100,7 @@ impl<N: Network> Puzzle<N> {
     pub fn get_leaves(&self, solution: &Solution<N>) -> Result<Vec<Vec<bool>>> {
         // Initialize a seeded random number generator.
         let mut rng = ChaChaRng::seed_from_u64(*solution.id());
-        // Output the leaves.
+        // Output the leaves.        
         self.inner.to_leaves(solution.epoch_hash(), &mut rng)
     }
 

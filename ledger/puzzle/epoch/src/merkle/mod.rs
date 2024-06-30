@@ -45,6 +45,9 @@ impl<N: Network> PuzzleTrait<N> for MerklePuzzle<N> {
         // Sample random field elements for each of the leaves, and convert them to bits.
         let leaves = (0..num_leaves).map(|_| Field::<N>::rand(rng).to_bits_le()).collect::<Vec<_>>();
         // Return the leaves.
+        println!("num leaves={}", num_leaves);
+        println!("{}, vec[0]={:?}", leaves[0].len(), leaves[0]);
+        println!("{}, vec[200]={:?}", leaves[200].len(), leaves[200]);
         Ok(leaves)
     }
 
