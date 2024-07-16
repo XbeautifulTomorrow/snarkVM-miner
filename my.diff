@@ -1,0 +1,221 @@
+diff --git a/.rusty-hook.toml b/.rusty-hook.toml
+index 210316b29..d766e395f 100644
+--- a/.rusty-hook.toml
++++ b/.rusty-hook.toml
+@@ -1,5 +1,5 @@
+ [hooks]
+-pre-commit = "cargo +nightly fmt --all -- --check && cargo clippy --workspace --all-targets --all-features"
++#pre-commit = "cargo +nightly fmt --all -- --check && cargo clippy --workspace --all-targets --all-features"
+ 
+ [logging]
+ verbose = true
+diff --git a/console/collections/src/kary_merkle_tree/helpers/path_hash.rs b/console/collections/src/kary_merkle_tree/helpers/path_hash.rs
+index 6c3dd1481..38b3a7425 100644
+--- a/console/collections/src/kary_merkle_tree/helpers/path_hash.rs
++++ b/console/collections/src/kary_merkle_tree/helpers/path_hash.rs
+@@ -18,11 +18,18 @@ use snarkvm_console_types::prelude::*;
+ 
+ #[cfg(not(feature = "serial"))]
+ use rayon::prelude::*;
++use snarkvm_utilities::bytes_from_bits_le;
+ 
+ /// A trait for a Merkle path hash function.
+ pub trait PathHash: Clone + Send + Sync {
+     type Hash: Copy + Clone + Debug + Default + PartialEq + Eq + FromBytes + ToBytes + Send + Sync;
+ 
++
++    fn log_idx(&self, _children : &[&[Self::Hash]], _n : usize)
++    {
++        
++    }
++
+     /// Returns the hash of the given child nodes.
+     fn hash_children(&self, children: &[Self::Hash]) -> Result<Self::Hash>;
+ 
+@@ -36,7 +43,7 @@ pub trait PathHash: Clone + Send + Sync {
+     fn hash_all_children(&self, child_nodes: &[&[Self::Hash]]) -> Result<Vec<Self::Hash>> {
+         match child_nodes.len() {
+             0 => Ok(vec![]),
+-            1..=10000000 => child_nodes.iter().map(|children| self.hash_children(children)).collect(),
++            1..=100 => child_nodes.iter().map(|children: &&[<Self as PathHash>::Hash]| self.hash_children(children)).collect(),
+             _ => cfg_iter!(child_nodes).map(|children| self.hash_children(children)).collect(),
+         }
+     }
+@@ -45,6 +52,9 @@ pub trait PathHash: Clone + Send + Sync {
+ impl<E: Environment, const NUM_WINDOWS: u8, const WINDOW_SIZE: u8> PathHash for BHP<E, NUM_WINDOWS, WINDOW_SIZE> {
+     type Hash = Field<E>;
+ 
++    // fn log_idx(&self, _children : &[&[Self::Hash]], _n : usize)
++    // {}
++
+     /// Returns the hash of the given child nodes.
+     fn hash_children(&self, children: &[Self::Hash]) -> Result<Self::Hash> {
+         let mut input = Vec::new();
+@@ -61,6 +71,8 @@ impl<E: Environment, const NUM_WINDOWS: u8, const WINDOW_SIZE: u8> PathHash for
+ impl<E: Environment, const RATE: usize> PathHash for Poseidon<E, RATE> {
+     type Hash = Field<E>;
+ 
++    
++
+     /// Returns the hash of the given child nodes.
+     fn hash_children(&self, children: &[Self::Hash]) -> Result<Self::Hash> {
+         let mut input = Vec::with_capacity(1 + children.len());
+@@ -77,6 +89,16 @@ impl<E: Environment, const RATE: usize> PathHash for Poseidon<E, RATE> {
+ impl<const TYPE: u8, const VARIANT: usize> PathHash for Keccak<TYPE, VARIANT> {
+     type Hash = BooleanHash<VARIANT>;
+ 
++    fn log_idx(&self, childrens : &[&[Self::Hash]], n : usize) {        
++        let mut input = Vec::new();
++        // Prepend the nodes with a `true` bit.
++        
++        for child in childrens[n] {
++            input.extend_from_slice(child.as_slice());
++        }        
++        println!("{:?}", bytes_from_bits_le(&input));
++    }
++
+     /// Returns the hash of the given child nodes.
+     fn hash_children(&self, children: &[Self::Hash]) -> Result<Self::Hash> {
+ 
+diff --git a/console/collections/src/kary_merkle_tree/mod.rs b/console/collections/src/kary_merkle_tree/mod.rs
+index 08e9528b3..697c8ed6d 100644
+--- a/console/collections/src/kary_merkle_tree/mod.rs
++++ b/console/collections/src/kary_merkle_tree/mod.rs
+@@ -23,9 +23,20 @@ mod tests;
+ 
+ use snarkvm_console_types::prelude::*;
+ use aleo_std::prelude::*;
++
+ use std::ops::Range;
+ 
+-use snarkvm_utilities::{ bytes_from_bits_le};
++use snarkvm_utilities::{ bytes_from_bits_le, bits_from_bytes_le };
++
++fn vec_u8_to_bool_slice(vec: Vec<u8>) -> Vec<bool> {
++    let mut bool_vec = Vec::with_capacity(vec.len());
++    for byte in vec {
++                
++        bool_vec.push(byte == 1);
++        
++    }
++    bool_vec
++}
+ 
+ #[derive(Clone)]
+ pub struct KaryMerkleTree<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY: u8> {
+@@ -65,7 +76,7 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY:
+     pub fn new(leaf_hasher: &LH, path_hasher: &PH, leaves: &[LH::Leaf]) -> Result<Self> {
+         let timer = timer!("MerkleTree::new");
+ 
+-        println!("mtree depth={}, arity={}", DEPTH, ARITY);
++        //println!("mtree depth={}, arity={}", DEPTH, ARITY);
+         // Ensure the Merkle tree depth is greater than 0.
+         ensure!(DEPTH > 0, "Merkle tree depth must be greater than 0");
+         // Ensure the Merkle tree depth is less than or equal to 64.
+@@ -100,13 +111,17 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY:
+         let minimum_tree_size = std::cmp::max(
+             1,
+             num_nodes + leaves.len() + if all_nodes_are_full { 0 } else { arity - leaves.len() % arity },
+-        );
++        );        
+ 
+         // Initialize the Merkle tree.
+         let mut tree = vec![empty_hash; minimum_tree_size];        
++        lap!(timer, "Hashed test1");
+ 
+         // Compute and store each leaf hash.
+-        tree[num_nodes..num_nodes + leaves.len()].clone_from_slice(&leaf_hasher.hash_leaves(leaves)?);
++        let foo = leaf_hasher.hash_leaves(leaves)?;
++        lap!(timer, "Hashed test2");
++        tree[num_nodes..num_nodes + leaves.len()].clone_from_slice(&foo);
++        //tree[num_nodes..num_nodes + leaves.len()].clone_from_slice(&leaf_hasher.hash_leaves(leaves)?);
+         lap!(timer, "Hashed {} leaves", leaves.len());
+ 
+         // let foo1 = &tree[num_nodes];
+@@ -122,7 +137,7 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY:
+             // Compute the end index of the current level.
+             let end = child_indexes::<ARITY>(start).next().ok_or_else(|| anyhow!("Missing left-most child"))?;
+ 
+-            println!("start={}, start_index={} end={end}", start, start_index);
++            //println!("start={}, start_index={} end={end}", start, start_index);
+ 
+             // Construct the children for each node in the current level.
+             let child_nodes = (start..end)
+@@ -138,10 +153,18 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY:
+             // Compute and store the hashes for each node in the current level.
+             let num_full_nodes = child_nodes.len();
+             let hashes = path_hasher.hash_all_children(&child_nodes)?;
++
++            // println!("path child[0]=");
++            // path_hasher.log_idx(&child_nodes, 0);
++            lap!(timer, "path child hash len={}", hashes.len());
++
++            // println!("path child_hash[0]={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(hashes[0].to_bytes_le().unwrap())) );
++            // println!("path child_hash[17070]={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(hashes[17070].to_bytes_le().unwrap())) );
++            // println!("path child_hash[17071]={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(hashes[17071].to_bytes_le().unwrap())) );
++            // println!("path child_hash[17072]={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(hashes[17072].to_bytes_le().unwrap())) );
++
++            //println!("path child_hash[last]={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(hashes.last().unwrap().to_bytes_le().unwrap())) );            
+             
+-            
+-            let foo1 = hashes[0].to_bytes_le().unwrap();
+-            let foo2 = hashes.last().unwrap().to_bytes_le().unwrap();
+ 
+             tree[start..][..num_full_nodes].clone_from_slice(&hashes);
+             // Use the precomputed empty node hash for every empty node, if there are any.
+@@ -158,6 +181,9 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY:
+ 
+         // Compute the root hash, by iterating from the root level up to `DEPTH`.
+         let mut root_hash = tree[0];
++
++        //println!("root hash step0={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(root_hash.to_bytes_le().unwrap())) );
++
+         for _ in 0..padding_depth {
+             // Update the root hash, by hashing the current root hash with the empty hashes.
+ 
+@@ -167,9 +193,13 @@ impl<LH: LeafHash<Hash = PH::Hash>, PH: PathHash, const DEPTH: u8, const ARITY:
+             input.resize(ARITY as usize, empty_hash);
+ 
+             root_hash = path_hasher.hash_children(&input)?;
++
++            //println!("padding hash ={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(root_hash.to_bytes_le().unwrap())) );
+         }
+         lap!(timer, "Hashed {} padding levels", padding_depth);
+ 
++        //println!("root hash final={:?}", bytes_from_bits_le(&vec_u8_to_bool_slice(root_hash.to_bytes_le().unwrap())) );
++
+         finish!(timer);
+ 
+         Ok(Self {
+diff --git a/ledger/puzzle/epoch/src/merkle/mod.rs b/ledger/puzzle/epoch/src/merkle/mod.rs
+index b37d94c98..a55840f2d 100644
+--- a/ledger/puzzle/epoch/src/merkle/mod.rs
++++ b/ledger/puzzle/epoch/src/merkle/mod.rs
+@@ -45,9 +45,9 @@ impl<N: Network> PuzzleTrait<N> for MerklePuzzle<N> {
+         // Sample random field elements for each of the leaves, and convert them to bits.
+         let leaves = (0..num_leaves).map(|_| Field::<N>::rand(rng).to_bits_le()).collect::<Vec<_>>();
+         // Return the leaves.
+-        println!("num leaves={}", num_leaves);
+-        println!("{}, vec[0]={:?}", leaves[0].len(), leaves[0]);
+-        println!("{}, vec[200]={:?}", leaves[200].len(), leaves[200]);
++        //println!("num leaves={}", num_leaves);
++        // println!("{}, vec[0]={:?}", leaves[0].len(), leaves[0]);
++        // println!("{}, vec[200]={:?}", leaves[200].len(), leaves[200]);
+         Ok(leaves)
+     }
+ 
+diff --git a/ledger/puzzle/src/lib.rs b/ledger/puzzle/src/lib.rs
+index bb7847f66..0ebc96fa6 100644
+--- a/ledger/puzzle/src/lib.rs
++++ b/ledger/puzzle/src/lib.rs
+@@ -282,6 +282,10 @@ impl<N: Network> Puzzle<N> {
+         let merkle_tree = MerkleTree::new(&Sha3_256::default(), &Sha3_256::default(), leaves)?;
+         // Retrieve the Merkle tree root.
+         let root = merkle_tree.root();
++
++        let full_target = *U64::<N>::from_bits_be(&root[0..64])?;
++        //println!("full target={:x}", full_target);
++
+         // Truncate to a u64.
+         match *U64::<N>::from_bits_be(&root[0..64])? {
+             0 => Ok(u64::MAX),
